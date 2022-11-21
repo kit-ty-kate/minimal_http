@@ -1,0 +1,3 @@
+(library
+ (public_name minimal_http)
+ (libraries paf.mirage))
