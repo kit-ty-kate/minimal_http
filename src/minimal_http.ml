@@ -1,10 +1,21 @@
-module Headers = struct
+module Headers : sig
+  type t
+
+  val empty : t
+  val add_content_type : t -> string -> t
+
+  val to_list : body:string -> t -> (string * string) list
+end = struct
   module Map = Map.Make (String)
 
   type t = string Map.t
 
   let empty = Map.empty
   let add_content_type map x = Map.add "content-type" x map
+
+  let to_list ~body map =
+    let map = Map.add "content-length" (string_of_int (String.length body)) map in
+    Map.bindings map
 end
 
 type t = {
@@ -19,7 +30,7 @@ let http_1_1_request_handler ~request_handler reqd =
     meth = request.Httpaf.Request.meth;
     target = request.Httpaf.Request.target;
     response = (fun ~status ~headers ~body ->
-      let headers = Httpaf.Headers.of_list (Headers.Map.bindings headers) in
+      let headers = Httpaf.Headers.of_list (Headers.to_list ~body headers) in
       let response = Httpaf.Response.create ~headers status in
       Httpaf.Reqd.respond_with_string reqd response body
     );
@@ -32,7 +43,7 @@ let http_2_0_request_handler ~request_handler reqd =
     meth = request.H2.Request.meth;
     target = request.H2.Request.target;
     response = (fun ~status ~headers ~body ->
-      let headers = H2.Headers.of_list (Headers.Map.bindings headers) in
+      let headers = H2.Headers.of_list (Headers.to_list ~body headers) in
       let response = H2.Response.create ~headers (status :> H2.Status.t) in
       H2.Reqd.respond_with_string reqd response body
     );
