@@ -52,7 +52,9 @@ let http_2_0_request_handler ~request_handler reqd =
     response = (fun ~status ~headers ~body ->
       let headers = H2.Headers.of_list (Headers.to_list ~body headers) in
       let response = H2.Response.create ~headers (status :> H2.Status.t) in
-      H2.Reqd.respond_with_string reqd response body
+      let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd response in
+      H2.Body.Writer.write_string writer body;
+      H2.Body.Writer.close writer;
     );
   } in
   request_handler self
