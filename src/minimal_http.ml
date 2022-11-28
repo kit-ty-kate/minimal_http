@@ -18,10 +18,17 @@ end = struct
     Map.bindings map
 end
 
+type response = status:Httpaf.Status.t -> headers:Headers.t -> body:string -> unit
+
 type t = {
   meth : Httpaf.Method.t;
   target : string;
-  response : status:Httpaf.Status.t -> headers:Headers.t -> body:string -> unit;
+  response : response;
+}
+
+type error = {
+  kind : [`Bad_gateway | `Bad_request | `Exn of exn | `Internal_server_error];
+  response : response;
 }
 
 let http_1_1_request_handler ~request_handler reqd =
@@ -57,13 +64,45 @@ let alpn_request_handler
   | Alpn.HTTP_1_1 _ -> http_1_1_request_handler ~request_handler reqd
   | Alpn.H2 _ -> http_2_0_request_handler ~request_handler reqd
 
+let http_1_1_error_handler ~error_handler _edn ?request:_ error respond =
+  let self = {
+    kind = error;
+    response = (fun ~status:_ ~headers:_ ~body:_ ->
+      let resp = respond Httpaf.Headers.empty in
+      Httpaf.Body.write_string resp "Error handled";
+      Httpaf.Body.flush resp (fun () -> Httpaf.Body.close_writer resp)
+    );
+  } in
+  error_handler self
 
-let server_handler ~error_handler:_ ~request_handler = {
+let http_2_0_error_handler ~error_handler _edn ?request:_ error respond =
+  let self = {
+    kind = error;
+    response = (fun ~status:_ ~headers:_ ~body:_ ->
+      let resp = respond H2.Headers.empty in
+      H2.Body.Writer.write_string resp "Error handled";
+      H2.Body.Writer.flush resp (fun () -> H2.Body.Writer.close resp)
+    );
+  } in
+  error_handler self
+
+let alpn_error_handler
+  : type reqd headers request response ro wo.
+    error_handler:_ -> _ -> ?request:request -> _ -> (headers -> wo) ->
+    (reqd, headers, request, response, ro, wo) Alpn.protocol -> unit
+  = fun ~error_handler edn ?request error respond -> function
+  | Alpn.HTTP_1_1 _ -> http_1_1_error_handler ~error_handler edn ?request error respond
+  | Alpn.H2 _ -> http_2_0_error_handler ~error_handler edn ?request error respond
+
+let server_handler ~error_handler ~request_handler = {
   Alpn.
-  error = (fun _edn _protocol ?request:_ _error _respond -> ());
+  error = (fun edn protocol ?request error respond -> alpn_error_handler ~error_handler edn ?request error respond protocol);
   request = (fun flow edn reqd protocol -> alpn_request_handler ~request_handler flow edn reqd protocol);
 }
 
 let meth {meth; _} = meth
 let target {target; _} = target
-let response {response; _} = response
+let response {response; meth = _; _} = response
+
+let error_kind {kind; _} = kind
+let error_response {response; kind = _} = response
